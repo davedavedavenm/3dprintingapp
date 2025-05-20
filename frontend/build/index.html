@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Print Quoting System</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; line-height: 1.6; }
+    .container { max-width: 800px; margin: 0 auto; }
+    h1 { color: #333; }
+    .message { padding: 20px; background-color: #f5f5f5; border-radius: 5px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>3D Print Quoting System</h1>
+    <div class="message">
+      <h2>System Successfully Deployed!</h2>
+      <p>The application is now running on your Raspberry Pi.</p>
+      <p>API Status: <span id="status">Checking...</span></p>
+    </div>
+  </div>
+  <script>
+    fetch('/api/v1/materials')
+      .then(response => {
+        if (response.ok) return response.json();
+        throw new Error('API request failed');
+      })
+      .then(data => {
+        document.getElementById('status').textContent = 'Online - Materials API responding';
+        document.getElementById('status').style.color = 'green';
+      })
+      .catch(error => {
+        document.getElementById('status').textContent = 'Offline - Cannot connect to backend';
+        document.getElementById('status').style.color = 'red';
+      });
+  </script>
+</body>
+</html>

@@ -1,0 +1,291 @@
+# 3D Print Quoting System - Docker Compose Configuration
+# Production-ready container orchestration
+
+version: '3.8'
+
+services:
+  # Main application service
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: 3d-quoting-app
+    restart: unless-stopped
+    environment:
+      - FLASK_ENV=production
+      - SECRET_KEY=${SECRET_KEY}
+      - UPLOAD_FOLDER=/app/uploads
+      - GCODE_FOLDER=/app/temp
+      - PRUSA_SLICER_PATH=/opt/prusa-slicer/prusa-slicer
+      
+      # Database configuration
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///app/data/quotes.db}
+      
+      # Redis configuration
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      
+      # PayPal configuration
+      - PAYPAL_CLIENT_ID=${PAYPAL_CLIENT_ID}
+      - PAYPAL_CLIENT_SECRET=${PAYPAL_CLIENT_SECRET}
+      - PAYPAL_WEBHOOK_ID=${PAYPAL_WEBHOOK_ID}
+      - PAYPAL_SANDBOX=${PAYPAL_SANDBOX:-true}
+      
+      # Pricing configuration
+      - PLA_RATE=${PLA_RATE:-0.025}
+      - ABS_RATE=${ABS_RATE:-0.028}
+      - PETG_RATE=${PETG_RATE:-0.035}
+      - TPU_RATE=${TPU_RATE:-0.045}
+      - TIME_RATE=${TIME_RATE:-0.15}
+      - OVERHEAD_MULTIPLIER=${OVERHEAD_MULTIPLIER:-1.35}
+      
+      # Security configuration
+      - VIRUS_SCAN_ENABLED=${VIRUS_SCAN_ENABLED:-false}
+      - MAX_CONTENT_LENGTH=${MAX_CONTENT_LENGTH:-104857600}
+      
+      # Frontend URL
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      
+    volumes:
+      - app_uploads:/app/uploads
+      - app_temp:/app/temp
+      - app_logs:/app/logs
+      - app_data:/app/data
+    ports:
+      - "${APP_PORT:-5000}:5000"
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - quoting_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # PostgreSQL database
+  postgres:
+    image: postgres:15-alpine
+    container_name: 3d-quoting-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-quoting_db}
+      - POSTGRES_USER=${POSTGRES_USER:-quoting_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - quoting_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-quoting_user} -d ${POSTGRES_DB:-quoting_db}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Redis cache
+  redis:
+    image: redis:7-alpine
+    container_name: 3d-quoting-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - quoting_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Nginx reverse proxy
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: 3d-quoting-nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/nginx/sites-enabled:/etc/nginx/sites-enabled:ro
+      - nginx_logs:/var/log/nginx
+      - ssl_certs:/etc/ssl/certs
+    depends_on:
+      - app
+    networks:
+      - quoting_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Background worker for async tasks
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: 3d-quoting-worker
+    restart: unless-stopped
+    environment:
+      - FLASK_ENV=production
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///app/data/quotes.db}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - PRUSA_SLICER_PATH=/opt/prusa-slicer/prusa-slicer
+    volumes:
+      - app_uploads:/app/uploads
+      - app_temp:/app/temp
+      - app_logs:/app/logs
+      - app_data:/app/data
+    command: ["worker"]
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - quoting_network
+
+  # Scheduled tasks
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: 3d-quoting-scheduler
+    restart: unless-stopped
+    environment:
+      - FLASK_ENV=production
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///app/data/quotes.db}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+    volumes:
+      - app_uploads:/app/uploads
+      - app_temp:/app/temp
+      - app_logs:/app/logs
+      - app_data:/app/data
+    command: ["scheduler"]
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - quoting_network
+
+  # Frontend service (React)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: 3d-quoting-frontend
+    restart: unless-stopped
+    environment:
+      - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost:5000/api/v1}
+      - REACT_APP_PAYPAL_CLIENT_ID=${PAYPAL_CLIENT_ID}
+      - REACT_APP_ENVIRONMENT=${ENVIRONMENT:-production}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - frontend_build:/app/build
+    networks:
+      - quoting_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# Named volumes for data persistence
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  app_uploads:
+    driver: local
+  app_temp:
+    driver: local
+  app_logs:
+    driver: local
+  app_data:
+    driver: local
+  nginx_logs:
+    driver: local
+  ssl_certs:
+    driver: local
+  frontend_build:
+    driver: local
+
+# Network configuration
+networks:
+  quoting_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# Development override
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+---
+# docker-compose.dev.yml
+version: '3.8'
+
+services:
+  app:
+    build:
+      target: development
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+    volumes:
+      - ./backend:/app:cached
+      - /app/__pycache__
+    command: ["python", "main.py"]
+    
+  frontend:
+    command: ["npm", "start"]
+    volumes:
+      - ./frontend:/app:cached
+      - /app/node_modules
+    environment:
+      - REACT_APP_API_URL=http://localhost:5000/api/v1
+      - FAST_REFRESH=false
+
+  # Development tools
+  mailhog:
+    image: mailhog/mailhog
+    container_name: 3d-quoting-mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - quoting_network
+
+  # Database administration
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: 3d-quoting-pgadmin
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-admin@admin.com}
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin}
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    networks:
+      - quoting_network
+
+volumes:
+  pgadmin_data:
+    driver: local

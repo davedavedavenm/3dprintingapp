@@ -1,0 +1,27 @@
+# Dependencies (already covered by root, but good for explicitness if frontend is standalone)
+# node_modules/ 
+
+# Build artifacts
+build/
+dist/
+coverage/
+
+# Local Environment files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Cache
+.cache/
+# node_modules/.cache/ # Already covered by root .gitignore, but doesn't hurt
+
+# Other
+.DS_Store
+Thumbs.db

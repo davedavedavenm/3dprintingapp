@@ -1,0 +1,187 @@
+# 3D Print Quoting System - Docker Compose Configuration for Raspberry Pi
+# ARM-compatible container orchestration for deployment on Raspberry Pi 4
+
+version: '3.8'
+
+services:
+  # Main application service
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.arm
+      target: production
+    container_name: 3d-quoting-app
+    restart: unless-stopped
+    environment:
+      - FLASK_ENV=production
+      - SECRET_KEY=${SECRET_KEY:-default_dev_key_change_in_production}
+      - UPLOAD_FOLDER=/app/uploads
+      - GCODE_FOLDER=/app/temp
+      - PRUSA_SLICER_PATH=/opt/prusa-slicer/prusa-slicer
+      
+      # Database configuration - SQLite for simplicity on Raspberry Pi
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///app/data/quotes.db}
+      
+      # Redis configuration
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      
+      # PayPal configuration
+      - PAYPAL_CLIENT_ID=${PAYPAL_CLIENT_ID:-}
+      - PAYPAL_CLIENT_SECRET=${PAYPAL_CLIENT_SECRET:-}
+      - PAYPAL_WEBHOOK_ID=${PAYPAL_WEBHOOK_ID:-}
+      - PAYPAL_SANDBOX=${PAYPAL_SANDBOX:-true}
+      
+      # Pricing configuration
+      - PLA_RATE=${PLA_RATE:-0.025}
+      - ABS_RATE=${ABS_RATE:-0.028}
+      - PETG_RATE=${PETG_RATE:-0.035}
+      - TPU_RATE=${TPU_RATE:-0.045}
+      - TIME_RATE=${TIME_RATE:-0.15}
+      - OVERHEAD_MULTIPLIER=${OVERHEAD_MULTIPLIER:-1.35}
+      
+      # Security configuration
+      - VIRUS_SCAN_ENABLED=${VIRUS_SCAN_ENABLED:-false}
+      - MAX_CONTENT_LENGTH=${MAX_CONTENT_LENGTH:-104857600}
+      
+      # Frontend URL
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      
+    volumes:
+      - app_uploads:/app/uploads
+      - app_temp:/app/temp
+      - app_logs:/app/logs
+      - app_data:/app/data
+    ports:
+      - "${APP_PORT:-5000}:5000"
+    depends_on:
+      - redis
+    networks:
+      - quoting_network
+    # Use a simpler health check for Raspberry Pi
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 512M # Limit memory for Pi compatibility
+
+  # Redis cache - using ARM-compatible image
+  redis:
+    image: arm64v8/redis:7-alpine
+    container_name: 3d-quoting-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --save 60 1 --maxmemory 256mb
+    networks:
+      - quoting_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 256M # Limit memory for Pi compatibility
+
+  # Nginx reverse proxy
+  nginx:
+    image: arm64v8/nginx:1.25-alpine
+    container_name: 3d-quoting-nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+    volumes:
+      - ./frontend/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - nginx_logs:/var/log/nginx
+      - frontend_build:/usr/share/nginx/html:ro
+    depends_on:
+      - app
+    networks:
+      - quoting_network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 128M # Limit memory for Pi compatibility
+
+  # Frontend build container (for building the frontend)
+  frontend-build:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: 3d-quoting-frontend-build
+    volumes:
+      - frontend_build:/usr/share/nginx/html
+      - frontend_build:/mnt
+    # This container exits after building the frontend files
+    command: /bin/sh -c "cp -r /usr/share/nginx/html/. /mnt/ && echo 'Frontend build complete'"
+    deploy:
+      resources:
+        limits:
+          memory: 512M # Limit memory for Pi compatibility
+    restart: "no"
+
+  # Slimmed down worker for background tasks - Optional, can be commented out for minimal Pi deployment
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.arm
+      target: production
+    container_name: 3d-quoting-worker
+    restart: unless-stopped
+    environment:
+      - FLASK_ENV=production
+      - SECRET_KEY=${SECRET_KEY:-default_dev_key_change_in_production}
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///app/data/quotes.db}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - PRUSA_SLICER_PATH=/opt/prusa-slicer/prusa-slicer
+    volumes:
+      - app_uploads:/app/uploads
+      - app_temp:/app/temp
+      - app_logs:/app/logs
+      - app_data:/app/data
+    command: ["worker"]
+    depends_on:
+      - redis
+    networks:
+      - quoting_network
+    deploy:
+      resources:
+        limits:
+          memory: 256M # Limit memory for Pi compatibility
+
+# Named volumes for data persistence
+volumes:
+  redis_data:
+    driver: local
+  app_uploads:
+    driver: local
+  app_temp:
+    driver: local
+  app_logs:
+    driver: local
+  app_data:
+    driver: local
+  nginx_logs:
+    driver: local
+  frontend_build:
+    driver: local
+
+# Network configuration
+networks:
+  quoting_network:
+    driver: bridge

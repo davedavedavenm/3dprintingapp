@@ -1,0 +1,155 @@
+version: '3.8' # 'version' is technically obsolete but often kept for clarity
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.arm # Uses Dockerfile.arm
+      target: production
+    container_name: 3d-quoting-app
+    restart: unless-stopped
+    environment:
+      - FLASK_ENV=production
+      - SECRET_KEY=${SECRET_KEY:-default_dev_key_change_in_production}
+      - UPLOAD_FOLDER=/app/uploads
+      - GCODE_FOLDER=/app/temp
+      - PRUSA_SLICER_PATH=/opt/prusa-slicer/prusa-slicer
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///app/data/quotes.db} # SQLite for Pi
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - PAYPAL_CLIENT_ID=${PAYPAL_CLIENT_ID:-}
+      - PAYPAL_CLIENT_SECRET=${PAYPAL_CLIENT_SECRET:-}
+      - PAYPAL_WEBHOOK_ID=${PAYPAL_WEBHOOK_ID:-}
+      - PAYPAL_SANDBOX=${PAYPAL_SANDBOX:-true}
+      - PLA_RATE=${PLA_RATE:-0.025}
+      - ABS_RATE=${ABS_RATE:-0.028}
+      - PETG_RATE=${PETG_RATE:-0.035}
+      - TPU_RATE=${TPU_RATE:-0.045}
+      - TIME_RATE=${TIME_RATE:-0.15}
+      - OVERHEAD_MULTIPLIER=${OVERHEAD_MULTIPLIER:-1.35}
+      - VIRUS_SCAN_ENABLED=${VIRUS_SCAN_ENABLED:-false}
+      - MAX_CONTENT_LENGTH=${MAX_CONTENT_LENGTH:-104857600}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost} # Nginx serves on port 80 by default
+    volumes:
+      - app_uploads:/app/uploads
+      - app_temp:/app/temp
+      - app_logs:/app/logs
+      - app_data:/app/data # For SQLite DB
+    ports:
+      - "${APP_PORT:-5000}:5000"
+    depends_on:
+      - redis
+    networks:
+      - quoting_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+  redis:
+    image: arm64v8/redis:7-alpine # ARM-compatible Redis
+    container_name: 3d-quoting-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --save 60 1 --maxmemory 256mb # Config for Pi
+    networks:
+      - quoting_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+  nginx:
+    image: arm64v8/nginx:1.25-alpine # ARM-compatible Nginx
+    container_name: 3d-quoting-nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80" # Nginx listens on 80 by default
+    volumes:
+      - ./frontend/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - nginx_logs:/var/log/nginx
+      - frontend_build:/usr/share/nginx/html:ro # Serve built frontend files
+    depends_on:
+      app:
+        condition: service_healthy # Wait for app to be healthy
+    networks:
+      - quoting_network
+    healthcheck: # Healthcheck for Nginx itself
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health_nginx"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+  frontend-build: # This service builds the frontend and exits
+    build:
+      context: ./frontend # Assumes Dockerfile is in ./frontend
+      dockerfile: Dockerfile # Standard frontend Dockerfile
+    # image: 3d-quoting-frontend-build # Image name is optional if only used for build stage
+    volumes:
+      - frontend_build:/app/build # Output the build to the named volume
+    # command: /bin/sh -c "echo 'Frontend build complete. Static files are in the frontend_build volume.'" # Command can be simpler
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          memory: 512M # Memory for the build process
+  # worker: # Optional worker, can be uncommented if needed
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.arm
+  #     target: production
+  #   container_name: 3d-quoting-worker
+  #   restart: unless-stopped
+  #   environment:
+  #     - FLASK_ENV=production
+  #     - SECRET_KEY=${SECRET_KEY:-default_dev_key_change_in_production}
+  #     - DATABASE_URL=${DATABASE_URL:-sqlite:///app/data/quotes.db}
+  #     - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+  #     - PRUSA_SLICER_PATH=/opt/prusa-slicer/prusa-slicer
+  #   volumes:
+  #     - app_uploads:/app/uploads
+  #     - app_temp:/app/temp
+  #     - app_logs:/app/logs
+  #     - app_data:/app/data
+  #   command: ["python", "worker.py"] # Assuming you have a worker.py
+  #   depends_on:
+  #     - redis
+  #   networks:
+  #     - quoting_network
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 256M
+volumes:
+  redis_data:
+    driver: local
+  app_uploads:
+    driver: local
+  app_temp:
+    driver: local
+  app_logs:
+    driver: local
+  app_data: # For SQLite DB
+    driver: local
+  nginx_logs:
+    driver: local
+  frontend_build: # Volume to share frontend build with Nginx
+    driver: local
+networks:
+  quoting_network:
+    driver: bridge

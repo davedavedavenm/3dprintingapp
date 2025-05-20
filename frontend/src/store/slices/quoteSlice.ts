@@ -1,0 +1,691 @@
+/**
+ * Quote State Management
+ * 
+ * Manages 3D printing quote configuration including:
+ * - Material selection and properties
+ * - Print options (layer height, infill, supports)
+ * - Real-time price calculation
+ * - Quote history and persistence
+ * - Order processing workflow
+ */
+
+import { createSlice, createAsyncThunk, PayloadAction, createSelector } from '@reduxjs/toolkit';
+import type { Material } from '../../components/Quote/MaterialSelector';
+
+// Re-export Material type for convenience
+export type { Material } from '../../components/Quote/MaterialSelector';
+
+// Core interfaces
+export interface PrintOptions {
+  layerHeight: number; // in mm
+  infillPercentage: number; // 0-100%
+  supportGeneration: SupportType;
+  printSpeed: number; // mm/s
+  shellThickness: number; // number of perimeters
+  topBottomLayers: number; // solid layers
+  brimWidth: number; // mm
+  raftEnabled: boolean;
+  adaptiveLayers: boolean; // optimize layer heights
+  customSettings?: Record<string, any>;
+}
+
+export interface ModelAnalysis {
+  volume: number; // cm³
+  surfaceArea: number; // cm²
+  boundingBox: {
+    x: number;
+    y: number;
+    z: number;
+  };
+  complexity: ComplexityScore;
+  requiredSupports: number; // estimated percentage
+  estimatedMaterial: number; // grams
+  estimatedPrintTime: number; // minutes
+}
+
+export interface QuoteCalculation {
+  materialCost: number;
+  laborCost: number;
+  machineTime: number;
+  setupCost: number;
+  postProcessingCost: number;
+  rushOrderSurcharge: number;
+  colorSurcharge: number;
+  quantityDiscount: number;
+  subtotal: number;
+  taxes: number;
+  total: number;
+  estimatedDelivery: Date;
+  breakdown: CostBreakdown[];
+}
+
+export interface CostBreakdown {
+  category: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+}
+
+export interface Quote {
+  id: string;
+  sessionId: string;
+  material: Material;
+  color: string;
+  printOptions: PrintOptions;
+  quantity: number;
+  modelAnalysis: ModelAnalysis;
+  calculation: QuoteCalculation;
+  createdAt: Date;
+  updatedAt: Date;
+  status: QuoteStatus;
+  customRequirements?: string;
+  deliveryAddress?: DeliveryAddress;
+  urgency: UrgencyLevel;
+}
+
+export interface DeliveryAddress {
+  name: string;
+  company?: string;
+  street: string;
+  city: string;
+  state: string;
+  zipCode: string;
+  country: string;
+  phone?: string;
+}
+
+export interface QuoteConfiguration {
+  uploadId?: string;
+  material?: Material;
+  selectedColor?: string;
+  printOptions: PrintOptions;
+  quantity: number;
+  urgency: UrgencyLevel;
+  postProcessing: PostProcessingService[];
+  customRequirements: string;
+  deliveryAddress?: DeliveryAddress;
+}
+
+// Enums
+export enum SupportType {
+  NONE = 'none',
+  MINIMAL = 'minimal',
+  STANDARD = 'standard',
+  EXTENSIVE = 'extensive',
+  SOLUBLE = 'soluble',
+}
+
+export enum ComplexityScore {
+  LOW = 'low',
+  MEDIUM = 'medium',
+  HIGH = 'high',
+  EXTREME = 'extreme',
+}
+
+export enum QuoteStatus {
+  DRAFT = 'draft',
+  PENDING = 'pending',
+  APPROVED = 'approved',
+  REJECTED = 'rejected',
+  IN_PRODUCTION = 'in_production',
+  COMPLETED = 'completed',
+  CANCELLED = 'cancelled',
+}
+
+export enum UrgencyLevel {
+  STANDARD = 'standard', // 5-7 business days
+  EXPEDITED = 'expedited', // 2-3 business days
+  RUSH = 'rush', // 24-48 hours
+  URGENT = 'urgent', // Same day (premium)
+}
+
+export enum PostProcessingService {
+  SANDING = 'sanding',
+  PAINTING = 'painting',
+  SMOOTHING = 'smoothing',
+  DRILLING = 'drilling',
+  THREADING = 'threading',
+  ANNEALING = 'annealing',
+  UV_TREATMENT = 'uv_treatment',
+  ASSEMBLY = 'assembly',
+}
+
+// State interface
+export interface QuoteState {
+  configuration: QuoteConfiguration;
+  currentQuote?: Quote;
+  history: Quote[];
+  isCalculating: boolean;
+  calculationError?: string;
+  presets: PrintOptionsPreset[];
+  deliveryOptions: DeliveryOption[];
+  availableServices: PostProcessingServiceInfo[];
+}
+
+export interface PrintOptionsPreset {
+  id: string;
+  name: string;
+  description: string;
+  category: 'quality' | 'speed' | 'economy' | 'custom';
+  options: PrintOptions;
+  isDefault?: boolean;
+}
+
+export interface DeliveryOption {
+  id: string;
+  name: string;
+  basePrice: number;
+  estimatedDays: number;
+  description: string;
+  available: boolean;
+}
+
+export interface PostProcessingServiceInfo {
+  id: PostProcessingService;
+  name: string;
+  description: string;
+  basePrice: number;
+  pricePerUnit?: number;
+  estimatedTime: number; // hours
+  requirements: string[];
+  available: boolean;
+}
+
+// Initial state
+const initialPrintOptions: PrintOptions = {
+  layerHeight: 0.2,
+  infillPercentage: 20,
+  supportGeneration: SupportType.STANDARD,
+  printSpeed: 50,
+  shellThickness: 3,
+  topBottomLayers: 4,
+  brimWidth: 5,
+  raftEnabled: false,
+  adaptiveLayers: false,
+};
+
+const initialState: QuoteState = {
+  configuration: {
+    printOptions: initialPrintOptions,
+    quantity: 1,
+    urgency: UrgencyLevel.STANDARD,
+    postProcessing: [],
+    customRequirements: '',
+  },
+  history: [],
+  isCalculating: false,
+  presets: [
+    {
+      id: 'high-quality',
+      name: 'High Quality',
+      description: 'Best surface finish and detail resolution',
+      category: 'quality',
+      options: {
+        ...initialPrintOptions,
+        layerHeight: 0.1,
+        infillPercentage: 30,
+        printSpeed: 30,
+        shellThickness: 4,
+        topBottomLayers: 6,
+        adaptiveLayers: true,
+      },
+    },
+    {
+      id: 'standard',
+      name: 'Standard',
+      description: 'Balanced quality and speed',
+      category: 'quality',
+      options: initialPrintOptions,
+      isDefault: true,
+    },
+    {
+      id: 'fast-print',
+      name: 'Fast Print',
+      description: 'Quick turnaround, good quality',
+      category: 'speed',
+      options: {
+        ...initialPrintOptions,
+        layerHeight: 0.3,
+        infillPercentage: 15,
+        printSpeed: 80,
+        shellThickness: 2,
+        topBottomLayers: 3,
+      },
+    },
+    {
+      id: 'economy',
+      name: 'Economy',
+      description: 'Cost-effective option',
+      category: 'economy',
+      options: {
+        ...initialPrintOptions,
+        layerHeight: 0.25,
+        infillPercentage: 15,
+        printSpeed: 60,
+        shellThickness: 2,
+        topBottomLayers: 3,
+        brimWidth: 0,
+      },
+    },
+  ],
+  deliveryOptions: [
+    {
+      id: 'standard',
+      name: 'Standard Delivery',
+      basePrice: 0,
+      estimatedDays: 7,
+      description: 'Free standard shipping',
+      available: true,
+    },
+    {
+      id: 'expedited',
+      name: 'Expedited Delivery',
+      basePrice: 25,
+      estimatedDays: 3,
+      description: '2-3 business days',
+      available: true,
+    },
+    {
+      id: 'rush',
+      name: 'Rush Delivery',
+      basePrice: 50,
+      estimatedDays: 1,
+      description: '24-48 hours',
+      available: true,
+    },
+  ],
+  availableServices: [
+    {
+      id: PostProcessingService.SANDING,
+      name: 'Surface Sanding',
+      description: 'Smooth surface finish with fine grit sanding',
+      basePrice: 15,
+      pricePerUnit: 5,
+      estimatedTime: 1,
+      requirements: ['Plastic materials only'],
+      available: true,
+    },
+    {
+      id: PostProcessingService.PAINTING,
+      name: 'Professional Painting',
+      description: 'Custom color paint finish with primer',
+      basePrice: 25,
+      pricePerUnit: 10,
+      estimatedTime: 2,
+      requirements: ['Post-sanding recommended'],
+      available: true,
+    },
+    {
+      id: PostProcessingService.SMOOTHING,
+      name: 'Chemical Smoothing',
+      description: 'Acetone vapor smoothing for ABS parts',
+      basePrice: 20,
+      pricePerUnit: 8,
+      estimatedTime: 1.5,
+      requirements: ['ABS material only'],
+      available: true,
+    },
+  ],
+};
+
+// Async thunks
+export const calculateQuote = createAsyncThunk(
+  'quote/calculate',
+  async (
+    {
+      uploadId,
+      configuration,
+    }: {
+      uploadId: string;
+      configuration: QuoteConfiguration;
+    },
+    { rejectWithValue }
+  ) => {
+    try {
+      const response = await fetch('/api/v1/quote/calculate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          upload_id: uploadId,
+          configuration,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Quote calculation failed');
+      }
+
+      const result = await response.json();
+      return result;
+    } catch (error) {
+      return rejectWithValue((error as Error).message);
+    }
+  }
+);
+
+export const saveQuote = createAsyncThunk(
+  'quote/save',
+  async (quote: Quote, { rejectWithValue }) => {
+    try {
+      const response = await fetch('/api/v1/quote/save', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(quote),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Failed to save quote');
+      }
+
+      const result = await response.json();
+      return result;
+    } catch (error) {
+      return rejectWithValue((error as Error).message);
+    }
+  }
+);
+
+export const loadQuoteHistory = createAsyncThunk(
+  'quote/loadHistory',
+  async (sessionId: string, { rejectWithValue }) => {
+    try {
+      const response = await fetch(`/api/v1/quote/history?session_id=${sessionId}`);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Failed to load quote history');
+      }
+
+      const result = await response.json();
+      return result.quotes;
+    } catch (error) {
+      return rejectWithValue((error as Error).message);
+    }
+  }
+);
+
+// Slice definition
+const quoteSlice = createSlice({
+  name: 'quote',
+  initialState,
+  reducers: {
+    // Configuration updates
+    setMaterial: (state, action: PayloadAction<Material>) => {
+      state.configuration.material = action.payload;
+      
+      // Auto-adjust print options based on material
+      const material = action.payload;
+      state.configuration.printOptions = {
+        ...state.configuration.printOptions,
+        layerHeight: material.specifications.layerHeight.recommended,
+        infillPercentage: material.specifications.infillRange.recommended,
+        supportGeneration: material.specifications.supportRequired 
+          ? SupportType.STANDARD 
+          : SupportType.NONE,
+        printSpeed: material.specifications.printSpeed,
+      };
+    },
+
+    setColor: (state, action: PayloadAction<string>) => {
+      state.configuration.selectedColor = action.payload;
+    },
+
+    setPrintOptions: (state, action: PayloadAction<Partial<PrintOptions>>) => {
+      state.configuration.printOptions = {
+        ...state.configuration.printOptions,
+        ...action.payload,
+      };
+    },
+
+    setQuantity: (state, action: PayloadAction<number>) => {
+      state.configuration.quantity = Math.max(1, action.payload);
+    },
+
+    setUrgency: (state, action: PayloadAction<UrgencyLevel>) => {
+      state.configuration.urgency = action.payload;
+    },
+
+    setPostProcessing: (state, action: PayloadAction<PostProcessingService[]>) => {
+      state.configuration.postProcessing = action.payload;
+    },
+
+    setCustomRequirements: (state, action: PayloadAction<string>) => {
+      state.configuration.customRequirements = action.payload;
+    },
+
+    setDeliveryAddress: (state, action: PayloadAction<DeliveryAddress>) => {
+      state.configuration.deliveryAddress = action.payload;
+    },
+
+    setUploadId: (state, action: PayloadAction<string>) => {
+      state.configuration.uploadId = action.payload;
+    },
+
+    // Preset management
+    applyPreset: (state, action: PayloadAction<string>) => {
+      const preset = state.presets.find(p => p.id === action.payload);
+      if (preset) {
+        state.configuration.printOptions = { ...preset.options };
+      }
+    },
+
+    addCustomPreset: (state, action: PayloadAction<PrintOptionsPreset>) => {
+      state.presets.push(action.payload);
+    },
+
+    removePreset: (state, action: PayloadAction<string>) => {
+      state.presets = state.presets.filter(p => p.id !== action.payload);
+    },
+
+    // Quote management
+    setCurrentQuote: (state, action: PayloadAction<Quote>) => {
+      state.currentQuote = action.payload;
+    },
+
+    addToHistory: (state, action: PayloadAction<Quote>) => {
+      const existingIndex = state.history.findIndex(q => q.id === action.payload.id);
+      if (existingIndex >= 0) {
+        state.history[existingIndex] = action.payload;
+      } else {
+        state.history.unshift(action.payload);
+      }
+    },
+
+    clearHistory: (state) => {
+      state.history = [];
+    },
+
+    removeFromHistory: (state, action: PayloadAction<string>) => {
+      state.history = state.history.filter(q => q.id !== action.payload);
+    },
+
+    // Reset configuration
+    resetConfiguration: (state) => {
+      state.configuration = {
+        printOptions: initialPrintOptions,
+        quantity: 1,
+        urgency: UrgencyLevel.STANDARD,
+        postProcessing: [],
+        customRequirements: '',
+      };
+      state.currentQuote = undefined;
+      state.calculationError = undefined;
+    },
+
+    // Clear errors
+    clearError: (state) => {
+      state.calculationError = undefined;
+    },
+  },
+  extraReducers: (builder) => {
+    // Calculate quote
+    builder
+      .addCase(calculateQuote.pending, (state) => {
+        state.isCalculating = true;
+        state.calculationError = undefined;
+      })
+      .addCase(calculateQuote.fulfilled, (state, action) => {
+        state.isCalculating = false;
+        state.currentQuote = action.payload;
+        // Add to history using reducer action
+        const existingIndex = state.history.findIndex(q => q.id === action.payload.id);
+        if (existingIndex >= 0) {
+          state.history[existingIndex] = action.payload;
+        } else {
+          state.history.unshift(action.payload);
+        }
+      })
+      .addCase(calculateQuote.rejected, (state, action) => {
+        state.isCalculating = false;
+        state.calculationError = action.payload as string;
+      });
+
+    // Save quote
+    builder
+      .addCase(saveQuote.fulfilled, (state, action) => {
+        state.currentQuote = action.payload;
+        // Add to history using reducer action
+        const existingIndex = state.history.findIndex(q => q.id === action.payload.id);
+        if (existingIndex >= 0) {
+          state.history[existingIndex] = action.payload;
+        } else {
+          state.history.unshift(action.payload);
+        }
+      });
+
+    // Load history
+    builder
+      .addCase(loadQuoteHistory.fulfilled, (state, action) => {
+        state.history = action.payload;
+      });
+      
+    // Fetch materials
+    builder
+      .addCase(fetchMaterials.fulfilled, (state, action) => {
+        // Store the materials in Redux state for other components to access
+        if (action.payload && Array.isArray(action.payload)) {
+          console.log('Materials fetched successfully:', action.payload.length);
+          // Set default material if one is available
+          if (action.payload.length > 0 && !state.configuration.material) {
+            state.configuration.material = action.payload[0];
+          }
+        } else {
+          console.warn('Materials API returned unexpected format:', action.payload);
+        }
+      })
+      .addCase(fetchMaterials.rejected, (state, action) => {
+        console.error('Failed to fetch materials:', action.payload);
+      });
+  },
+});
+
+// Export actions
+export const {
+  setMaterial,
+  setColor,
+  setPrintOptions,
+  setQuantity,
+  setUrgency,
+  setPostProcessing,
+  setCustomRequirements,
+  setDeliveryAddress,
+  setUploadId,
+  applyPreset,
+  addCustomPreset,
+  removePreset,
+  setCurrentQuote,
+  addToHistory,
+  clearHistory,
+  removeFromHistory,
+  resetConfiguration,
+  clearError,
+} = quoteSlice.actions;
+
+// Add fetchMaterials async action
+export const fetchMaterials = createAsyncThunk(
+  'quote/fetchMaterials',
+  async (_, { rejectWithValue }) => {
+    try {
+      console.log('Fetching materials from API');
+      const response = await fetch('/api/v1/materials');
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Failed to fetch materials');
+      }
+      
+      const result = await response.json();
+      console.log('Materials API response:', result);
+      
+      if (result.success && result.materials && Array.isArray(result.materials)) {
+        return result.materials;
+      } else {
+        throw new Error('Invalid materials response format');
+      }
+    } catch (error) {
+      console.error('Error in fetchMaterials:', error);
+      return rejectWithValue((error as Error).message);
+    }
+  }
+);
+
+// Selectors
+export const selectQuoteConfiguration = (state: { quote: QuoteState }) => state.quote.configuration;
+export const selectConfiguration = (state: { quote: QuoteState }) => state.quote.configuration;
+export const selectSelectedMaterial = (state: { quote: QuoteState }) => state.quote.configuration.material;
+export const selectSelectedColor = (state: { quote: QuoteState }) => state.quote.configuration.selectedColor;
+export const selectPrintOptions = (state: { quote: QuoteState }) => state.quote.configuration.printOptions;
+export const selectQuantity = (state: { quote: QuoteState }) => state.quote.configuration.quantity;
+export const selectUrgency = (state: { quote: QuoteState }) => state.quote.configuration.urgency;
+export const selectPostProcessing = (state: { quote: QuoteState }) => state.quote.configuration.postProcessing;
+export const selectCurrentQuote = (state: { quote: QuoteState }) => state.quote.currentQuote;
+export const selectQuoteHistory = (state: { quote: QuoteState }) => state.quote.history;
+export const selectIsCalculating = (state: { quote: QuoteState }) => state.quote.isCalculating;
+export const selectCalculationError = (state: { quote: QuoteState }) => state.quote.calculationError;
+export const selectQuoteErrors = (state: { quote: QuoteState }) => state.quote.calculationError;
+export const selectPresets = (state: { quote: QuoteState }) => state.quote.presets;
+export const selectDeliveryOptions = (state: { quote: QuoteState }) => state.quote.deliveryOptions;
+export const selectAvailableServices = (state: { quote: QuoteState }) => state.quote.availableServices;
+
+// Complex selectors
+export const selectEstimatedCost = createSelector(
+  [selectCurrentQuote],
+  (quote) => quote ? quote.calculation.total : 0
+);
+
+export const selectEstimatedDelivery = createSelector(
+  [selectCurrentQuote],
+  (quote) => quote ? quote.calculation.estimatedDelivery : null
+);
+
+export const selectDefaultPreset = createSelector(
+  [selectPresets],
+  (presets) => presets.find(p => p.isDefault)
+);
+
+export const selectCompatibleColors = createSelector(
+  [selectSelectedMaterial],
+  (material) => material ? material.colors.filter(c => c.availability !== 'out-of-stock') : []
+);
+
+export const selectConfigurationSummary = createSelector(
+  [selectQuoteConfiguration],
+  (config) => ({
+    material: config.material?.name || 'Not selected',
+    color: config.selectedColor || 'Not selected',
+    layerHeight: `${config.printOptions.layerHeight}mm`,
+    infill: `${config.printOptions.infillPercentage}%`,
+    quantity: config.quantity,
+    urgency: config.urgency,
+    postProcessing: config.postProcessing.length,
+  })
+);
+
+export default quoteSlice.reducer;
