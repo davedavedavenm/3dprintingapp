@@ -64,9 +64,7 @@ def get_materials():
         }
     ]
     
-    return jsonify({
-        'success': True,
-        'materials': materials,
-        'last_updated': datetime.utcnow().isoformat(),
-        'default_material': 'PLA'
-    }), 200
+    # Return just the materials array directly to match expected frontend format
+    # Adding debug output
+    print('\n===== MATERIALS BLUEPRINT RETURNING DIRECT ARRAY =====\n')
+    return jsonify(materials), 200

@@ -77,7 +77,7 @@ services:
       - PGDATA=/var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./config/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     networks:
@@ -97,7 +97,7 @@ services:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
-      - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - ./config/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
     command: redis-server /usr/local/etc/redis/redis.conf
     networks:
       - quoting_network
@@ -232,60 +232,3 @@ networks:
     ipam:
       config:
         - subnet: 172.20.0.0/16
-
-# Development override
-# Use with: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
----
-# docker-compose.dev.yml
-version: '3.8'
-
-services:
-  app:
-    build:
-      target: development
-    environment:
-      - FLASK_ENV=development
-      - FLASK_DEBUG=1
-    volumes:
-      - ./backend:/app:cached
-      - /app/__pycache__
-    command: ["python", "main.py"]
-    
-  frontend:
-    command: ["npm", "start"]
-    volumes:
-      - ./frontend:/app:cached
-      - /app/node_modules
-    environment:
-      - REACT_APP_API_URL=http://localhost:5000/api/v1
-      - FAST_REFRESH=false
-
-  # Development tools
-  mailhog:
-    image: mailhog/mailhog
-    container_name: 3d-quoting-mailhog
-    ports:
-      - "1025:1025"
-      - "8025:8025"
-    networks:
-      - quoting_network
-
-  # Database administration
-  pgadmin:
-    image: dpage/pgadmin4
-    container_name: 3d-quoting-pgadmin
-    environment:
-      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-admin@admin.com}
-      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin}
-    ports:
-      - "5050:80"
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    depends_on:
-      - postgres
-    networks:
-      - quoting_network
-
-volumes:
-  pgadmin_data:
-    driver: local

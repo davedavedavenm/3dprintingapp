@@ -226,16 +226,25 @@ export const MaterialSelector: React.FC<MaterialSelectorProps> = ({
         console.log('MaterialSelector: Fetching materials via Redux');
         // Dispatch the fetchMaterials thunk action to get materials from the API
         const resultAction = await dispatch(fetchMaterials());
-        const result = resultAction.payload;
         
-        if (result && Array.isArray(result)) {
-          console.log('MaterialSelector: Materials fetched successfully:', result.length);
-          // Set materials directly from API response
-          setMaterials(result);
-          
-          // If no material is selected yet and we have materials, select the first one
-          if (!selectedMaterial && result.length > 0) {
-            dispatch(setMaterial(result[0]));
+        if (resultAction && resultAction.payload) {
+          // Cast payload to unknown then to an array of Material type or check if it's an array
+          const payload = resultAction.payload as unknown;
+          // Check if payload is an array (direct array format) - the only format we expect now
+          if (Array.isArray(payload)) {
+            const result = payload as Material[];
+            console.log('MaterialSelector: Materials fetched successfully:', result.length);
+            // Set materials directly from API response
+            setMaterials(result);
+            
+            // If no material is selected yet and we have materials, select the first one
+            if (!selectedMaterial && result.length > 0) {
+              dispatch(setMaterial(result[0]));
+            }
+          } else {
+            console.error('MaterialSelector: API response is not an array:', payload);
+            setError('Failed to get materials from the API. The API response format is incorrect.');
+            setMaterials([]);
           }
         } else {
           console.warn('MaterialSelector: Unexpected API response format');
@@ -256,6 +265,12 @@ export const MaterialSelector: React.FC<MaterialSelectorProps> = ({
 
   // Filter materials based on current filters
   const filteredMaterials = useMemo(() => {
+    // Ensure materials is an array before filtering
+    if (!materials || !Array.isArray(materials)) {
+      console.error('Materials is not an array:', materials);
+      return [];
+    }
+    
     return materials.filter(material => {
       // Search filter
       if (filters.search && !material.name.toLowerCase().includes(filters.search.toLowerCase()) &&

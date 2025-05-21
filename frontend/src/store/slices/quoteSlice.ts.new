@@ -343,7 +343,7 @@ export const calculateQuote = createAsyncThunk(
     { rejectWithValue }
   ) => {
     try {
-      const response = await fetch('http://localhost:5000/api/v1/quote/calculate', {
+      const response = await fetch('/api/v1/quote/calculate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -371,7 +371,7 @@ export const saveQuote = createAsyncThunk(
   'quote/save',
   async (quote: Quote, { rejectWithValue }) => {
     try {
-      const response = await fetch('http://localhost:5000/api/v1/quote/save', {
+      const response = await fetch('/api/v1/quote/save', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -396,7 +396,7 @@ export const loadQuoteHistory = createAsyncThunk(
   'quote/loadHistory',
   async (sessionId: string, { rejectWithValue }) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/v1/quote/history?session_id=${sessionId}`);
+      const response = await fetch(`/api/v1/quote/history?session_id=${sessionId}`);
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -614,7 +614,6 @@ export const fetchMaterials = createAsyncThunk(
   async (_, { rejectWithValue }) => {
     try {
       console.log('Fetching materials from API');
-      const response = await fetch('http://localhost:5000/api/v1/materials/');
       
       if (!response.ok) {
         const errorData = await response.json();

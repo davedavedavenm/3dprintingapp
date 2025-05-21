@@ -1,0 +1,55 @@
+# 3D Print Quoting System - Development Configuration
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+version: '3.8'
+
+services:
+  app:
+    build:
+      target: development
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+    volumes:
+      - ./backend:/app:cached
+      - /app/__pycache__
+    command: ["python", "main.py"]
+    
+  frontend:
+    command: ["npm", "start"]
+    volumes:
+      - ./frontend:/app:cached
+      - /app/node_modules
+    environment:
+      - REACT_APP_API_URL=http://localhost:5000/api/v1
+      - FAST_REFRESH=false
+
+  # Development tools
+  mailhog:
+    image: mailhog/mailhog
+    container_name: 3d-quoting-mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - quoting_network
+
+  # Database administration
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: 3d-quoting-pgadmin
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-admin@admin.com}
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin}
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    networks:
+      - quoting_network
+
+volumes:
+  pgadmin_data:
+    driver: local

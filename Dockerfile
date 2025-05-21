@@ -48,6 +48,7 @@ RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     libgtk-3-0 \
     libgconf-2-4 \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
@@ -66,9 +67,9 @@ WORKDIR /app
 RUN chown -R appuser:appuser /app
 
 # Create required directories with proper permissions
-RUN mkdir -p /app/uploads /app/temp /app/logs \
-    && chown -R appuser:appuser /app/uploads /app/temp /app/logs \
-    && chmod 755 /app/uploads /app/temp /app/logs
+RUN mkdir -p /app/uploads /app/temp /app/logs /app/data \
+    && chown -R appuser:appuser /app/uploads /app/temp /app/logs /app/data \
+    && chmod 755 /app/uploads /app/temp /app/logs /app/data
 
 # Switch to non-root user
 USER appuser

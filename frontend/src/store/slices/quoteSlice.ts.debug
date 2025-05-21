@@ -1,0 +1,21 @@
+12:import { createSlice, createAsyncThunk, PayloadAction, createSelector } from '@reduxjs/toolkit';
+333:export const calculateQuote = createAsyncThunk(
+363:      return result;
+365:      return rejectWithValue((error as Error).message);
+370:export const saveQuote = createAsyncThunk(
+388:      return result;
+390:      return rejectWithValue((error as Error).message);
+395:export const loadQuoteHistory = createAsyncThunk(
+407:      return result.quotes;
+409:      return rejectWithValue((error as Error).message);
+574:          console.log('Materials fetched successfully:', action.payload.length);
+584:        console.error('Failed to fetch materials:', action.payload);
+612:export const fetchMaterials = createAsyncThunk(
+616:      console.log('Fetching materials from API');
+617:      const response = await fetch('/api/v1/materials/');
+625:      console.log('Materials API response:', result);
+628:        console.log('Direct array format detected, returning:', result.length);
+629:        return result;
+631:        console.error('Invalid materials API response format:', result);
+635:      console.error('Error in fetchMaterials:', error);
+636:      return rejectWithValue((error as Error).message);
