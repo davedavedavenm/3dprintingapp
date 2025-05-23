@@ -54,16 +54,29 @@ def calculate_quote():
         # Get quantity or use default
         quantity = int(configuration.get('quantity', 1))
         
-        # TODO: In a real implementation, we would resolve the upload_id to a file path
-        # For now, use a test file path for demonstration
-        # This should eventually use a FileService to map uploadId to actual file path
-        file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], 'test_cube.stl')
+        # Resolve the upload_id to an actual file path
+        # We assume upload_id is the filename in the UPLOAD_FOLDER
+        if not upload_id: # Should have been caught by previous validation, but good to double check
+            raise ValueError("uploadId is missing or empty.")
+
+        file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], upload_id)
         
         # Check if file exists
         if not os.path.exists(file_path):
-            file_path = os.path.join(os.path.dirname(__file__), '..', 'test_files', 'test_cube.stl')
-            if not os.path.exists(file_path):
-                raise ValueError(f"STL file not found for upload ID: {upload_id}")
+            # Attempt to find in test_files as a fallback for local dev, though this should ideally not be needed
+            # and indicates an issue with the upload_id or file persistence.
+            print(f"File not found in UPLOAD_FOLDER: {file_path}. Checking test_files as fallback.")
+            fallback_path = os.path.join(os.path.dirname(__file__), '..', 'test_files', upload_id)
+            if os.path.exists(fallback_path):
+                file_path = fallback_path
+                print(f"Found file in test_files: {file_path}")
+            else:
+                # If current_app.file_service and get_file_info are available, we could use them for more detailed info
+                # For now, stick to a simple file existence check.
+                # Example: file_info = current_app.file_service.get_file_info(file_path)
+                # if not file_info or not file_info['exists']:
+                #     raise ValueError(f"STL file not found for upload ID: {upload_id}. Path checked: {file_path}")
+                raise ValueError(f"STL file not found for upload ID: {upload_id}. Path checked: {file_path}")
         
         # Create slicing parameters from configuration
         slicing_params = SlicingParameters(
