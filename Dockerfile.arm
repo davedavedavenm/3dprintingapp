@@ -21,11 +21,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certifi
     EFFECTIVE_PRUSA_SLICER_VERSION="${PRUSA_SLICER_VERSION:-2.6.1}" && \
     echo "INFO: Effective PrusaSlicer version for download: $EFFECTIVE_PRUSA_SLICER_VERSION" && \
     wget --progress=dot:giga -O prusa-slicer.tar.bz2 \
-        "https://github.com/prusa3d/PrusaSlicer/releases/download/version_${EFFECTIVE_PRUSA_SLICER_VERSION}/PrusaSlicer-${EFFECTIVE_PRUSA_SLICER_VERSION}+linux-arm64-GTK3.tar.bz2" && \
+        "https://github.com/prusa3d/PrusaSlicer/releases/download/version_${EFFECTIVE_PRUSA_SLICER_VERSION}/PrusaSlicer-${EFFECTIVE_PRUSA_SLICER_VERSION}+linux-arm64-GTK3-202309060907.tar.bz2" && \
     echo "INFO: Download complete. Extracting..." && \
     tar -xjf prusa-slicer.tar.bz2 -C /opt && \
     echo "INFO: Extraction complete. Moving..." && \
-    mv "/opt/PrusaSlicer-${EFFECTIVE_PRUSA_SLICER_VERSION}+linux-arm64-GTK3" /opt/prusa-slicer && \
+    mv "/opt/PrusaSlicer-${EFFECTIVE_PRUSA_SLICER_VERSION}+linux-arm64-GTK3-202309060907" /opt/prusa-slicer && \
     echo "INFO: Move complete. Setting up symlink and cleaning up..." && \           rm prusa-slicer.tar.bz2 && \
     ln -s /opt/prusa-slicer/prusa-slicer /usr/local/bin/prusa-slicer && \
     echo "INFO: PrusaSlicer setup complete."
